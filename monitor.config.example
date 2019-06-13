@@ -1,0 +1,6 @@
+server:
+  port: 8080
+  testenv: true 
+  dbpath: db/
+  logfile: log/goattend.log
+  xapikeywrite: secret
