@@ -9,4 +9,5 @@ require (
 	github.com/gin-gonic/gin v1.4.0
 	github.com/olebedev/config v0.0.0-20190528211619-364964f3a8e4
 	github.com/pkg/errors v0.8.1 // indirect
+	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
 )

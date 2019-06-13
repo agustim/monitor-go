@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"time"
 
@@ -18,69 +17,6 @@ import (
 )
 
 const CfgFile string = "monitor.config"
-const NumHistoric int = 10
-
-type HistoryServer struct {
-	Hores []string `json:"Hores"`
-}
-
-func (h *HistoryServer) String() string {
-	out, _ := json.Marshal(h)
-	return (string(out))
-}
-
-func (h *HistoryServer) Sort() {
-	sort.Strings(h.Hores)
-}
-func (h *HistoryServer) Get(db *badger.DB, idServer string) {
-	err := db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(idServer))
-		if err != nil {
-			return err
-		}
-		valor, err := item.Value()
-		if err == nil {
-			json.Unmarshal([]byte(valor), h)
-		}
-		return err
-	})
-	if err != nil {
-		fmt.Println("Error: ", err.Error())
-	} else {
-		fmt.Println(h.String())
-	}
-}
-func (h *HistoryServer) Add(db *badger.DB, idServer string, hora string) {
-
-	err := db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(idServer))
-		if err != nil {
-			return err
-		}
-		valor, err := item.Value()
-		if err == nil {
-			json.Unmarshal([]byte(valor), h)
-		}
-		return err
-	})
-
-	if err != nil && err.Error() == "Key not found" {
-		h.Init()
-	}
-	h.Hores[0] = hora
-	h.Sort()
-	err = db.Update(func(txn *badger.Txn) error {
-		err := txn.Set([]byte(idServer), []byte(h.String()))
-		return err
-	})
-	if err != nil {
-		fmt.Println("Error Update!")
-	}
-
-}
-func (h *HistoryServer) Init() {
-	h.Hores = make([]string, NumHistoric)
-}
 
 var DBPath string
 var LogFile string
@@ -92,42 +28,6 @@ var TestEnv bool
 var PortServer int
 var DBPoint *badger.DB
 var AssistitCounter int
-
-type RegistreServer struct {
-	IdServer      string `json:"idServer"`
-	Hora          string `json:"Hora"`
-	CPU           int    `json:"CPU"`
-	NSockets      int    `json:"NSockets"`
-	Memory        int    `json:"Memroy"`
-	TotalBytesIn  int    `json:"TotalBytesIn"`
-	TotalBytesOut int    `json:"TotalBytesOut"`
-}
-
-func (r *RegistreServer) String() string {
-	out, _ := json.Marshal(r)
-	return (string(out))
-}
-
-func (r *RegistreServer) Strings() []string {
-	record := make([]string, 7)
-	record[0] = r.IdServer
-	record[1] = r.Hora
-	record[2] = strconv.Itoa(r.CPU)
-	record[3] = strconv.Itoa(r.NSockets)
-	record[4] = strconv.Itoa(r.Memory)
-	record[5] = strconv.Itoa(r.TotalBytesIn)
-	record[6] = strconv.Itoa(r.TotalBytesOut)
-
-	return record
-}
-
-func (r *RegistreServer) Create(db *badger.DB) error {
-	err := db.Update(func(txn *badger.Txn) error {
-		err := txn.Set([]byte(r.IdServer+"-"+r.Hora), []byte(r.String()))
-		return err
-	})
-	return err
-}
 
 func OpenDatabase() (*badger.DB, error) {
 	opts := badger.DefaultOptions
@@ -178,6 +78,7 @@ func main() {
 	{
 		v1.POST("/add", fetchAdd)
 		v1.GET("/export", fetchExport)
+		v1.GET("/export/:server", fetchExportServer)
 	}
 	router.Run(":" + strconv.Itoa(PortServer))
 }
@@ -232,6 +133,18 @@ func fetchAdd(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, r.String())
 }
+func fetchExportServer(c *gin.Context) {
+	serverId := c.Param("server")
+
+	b := &bytes.Buffer{}
+	w := csv.NewWriter(b)
+
+	ExportServer(serverId, w, DBPoint)
+	w.Flush()
+
+	c.Data(http.StatusOK, "text/csv", b.Bytes())
+}
+
 func fetchExport(c *gin.Context) {
 
 	b := &bytes.Buffer{}
@@ -263,4 +176,31 @@ func Export(w *csv.Writer, db *badger.DB) {
 		fmt.Println("Error Iterator: ", err)
 	}
 
+}
+
+func ExportServer(serverId string, w *csv.Writer, db *badger.DB) {
+	var h HistoryServer
+	r := &RegistreServer{}
+
+	h.Get(db, r.IdServer)
+
+	err := db.View(func(txn *badger.Txn) error {
+		var errtorn error
+		for _, hora := range h.Hores {
+			item, err := txn.Get([]byte(serverId + "-" + hora))
+			if err != nil {
+				errtorn = err
+				fmt.Println("error")
+			}
+			valor, err := item.Value()
+			if err == nil {
+				json.Unmarshal([]byte(valor), r)
+				w.Write(r.Strings())
+			}
+		}
+		return errtorn
+	})
+	if err != nil {
+		fmt.Println("err: " + err.Error())
+	}
 }
